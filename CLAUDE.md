@@ -36,6 +36,11 @@ Multi-Model-Orchestrierung via tmux & Docker. Ein lokaler Claude-Code-Agent (Hos
 - Host-Agent schreibt Ergebnisse in `.agent-memory/` bevor Container stirbt
 - Keine persistenten Volumes fuer Code — nur fuer Ergebnisse/Logs
 
+## Research-Workflow (Standard)
+Web-Recherche IMMER ueber die Research-Pipeline ausfuehren:
+1. **Perplexity** (Suche + Links) → 2. **NotebookLM** (Ingest + RAG) → 3. **Claude** (liest nur Ergebnis)
+Ergebnisse in `research/<topic>-<date>.md` speichern. Siehe `skills/research-pipeline/SKILL.md`.
+
 ## Sicherheit
 - Host fuehrt NIEMALS Code aus, der aus dem Container kommt, ohne Review
 - Container hat keinen Zugriff auf Host-Dateisystem (ausser explizite Mounts)
