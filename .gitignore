@@ -1,0 +1,4 @@
+output/
+.env
+docker/.env
+.agent-memory/
