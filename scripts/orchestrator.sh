@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Inception-Sandbox Multi-Model Orchestrator (Local/tmux version)
-# Runs Claude and Codex locally via tmux sessions + git worktrees for isolation.
+# Inception-Sandbox Multi-Model Orchestrator (Windows-native)
+# Runs Claude and Codex locally via sequential CLI calls + git worktrees.
 # No API keys needed — uses OAuth (Claude Max Plan + Codex Desktop App).
+# No tmux/WSL needed — works in Git Bash on Windows.
 #
 # Usage: ./orchestrator.sh --prompt "Fix the bug in main.py"
 # Usage: ./orchestrator.sh --mode dual --prompt "Implement feature X"
@@ -11,12 +12,6 @@
 # Modes:
 #   single (default) — one agent handles the task
 #   dual             — Claude plans, Codex implements, Claude reviews
-#
-# Prerequisites:
-#   - tmux installed (WSL2 or Git Bash)
-#   - claude CLI authenticated (Max Plan)
-#   - codex CLI authenticated (Desktop App)
-#   - git repo as working directory
 
 set -euo pipefail
 
@@ -25,7 +20,6 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_DIR="$PROJECT_ROOT/output"
 mkdir -p "$OUTPUT_DIR"
 
-TMUX_SESSION="inception"
 MODE="single"
 AGENT="claude"
 TASK=""
@@ -70,7 +64,7 @@ REPO_DIR="${REPO_DIR:-$(pwd)}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 echo "============================================"
-echo " Inception-Sandbox Orchestrator (Local)"
+echo " Inception-Sandbox Orchestrator"
 echo " Mode: $MODE | Agent: $AGENT"
 echo " Repo: $REPO_DIR"
 echo "============================================"
@@ -81,14 +75,14 @@ create_worktree() {
     local wt_dir="$REPO_DIR/.worktrees/inception-${name}-${TIMESTAMP}"
     mkdir -p "$(dirname "$wt_dir")"
 
-    # Create worktree from current HEAD
-    git -C "$REPO_DIR" worktree add "$wt_dir" HEAD --detach 2>/dev/null || {
-        # Fallback: just copy the repo if worktree fails
-        echo "      WARN: git worktree failed, using direct copy"
+    if git -C "$REPO_DIR" worktree add "$wt_dir" HEAD --detach >/dev/null 2>&1; then
+        printf '%s' "$wt_dir"
+    else
+        echo "      WARN: git worktree failed, using directory copy" >&2
         mkdir -p "$wt_dir"
         cp -r "$REPO_DIR"/* "$wt_dir/" 2>/dev/null || true
-    }
-    echo "$wt_dir"
+        printf '%s' "$wt_dir"
+    fi
 }
 
 # --- Helper: cleanup worktrees ---
@@ -98,159 +92,148 @@ cleanup_worktrees() {
     rm -rf "$REPO_DIR/.worktrees/inception-"* 2>/dev/null || true
 }
 
-# --- Helper: send command to tmux pane and wait ---
-send_and_wait() {
-    local pane="$1"
-    local cmd="$2"
-    local output_file="$3"
-    local marker="__INCEPTION_DONE_${RANDOM}__"
+# --- Helper: run agent CLI and capture output ---
+run_agent() {
+    local agent="$1"
+    local prompt="$2"
+    local work_dir="$3"
+    local output_file="$4"
 
-    # Send command with done-marker
-    tmux send-keys -t "${TMUX_SESSION}:${pane}" \
-        "${cmd} ; echo '${marker}'" Enter
+    echo "      Running $agent in: $work_dir"
 
-    # Poll until marker appears
-    echo "      Waiting for completion..."
-    while true; do
-        sleep 3
-        local output
-        output=$(tmux capture-pane -t "${TMUX_SESSION}:${pane}" -p -S -500 2>/dev/null || echo "")
-        if echo "$output" | grep -q "$marker"; then
-            # Save everything before the marker
-            echo "$output" | sed "/${marker}/d" > "$output_file"
-            return 0
-        fi
-    done
-}
-
-# --- Phase 1: Setup tmux session ---
-echo ""
-echo "[1/6] Setting up tmux session..."
-
-# Kill old session if exists
-tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
-
-if [[ "$MODE" == "dual" ]]; then
-    # Create worktrees for isolation
-    CLAUDE_DIR=$(create_worktree "claude")
-    CODEX_DIR=$(create_worktree "codex")
-    echo "      Claude worktree: $CLAUDE_DIR"
-    echo "      Codex worktree:  $CODEX_DIR"
-
-    # Create tmux session with 2 panes
-    tmux new-session -d -s "$TMUX_SESSION" -c "$CLAUDE_DIR"
-    tmux rename-window -t "${TMUX_SESSION}:0" "claude"
-    tmux new-window -t "$TMUX_SESSION" -n "codex" -c "$CODEX_DIR"
-    echo "      tmux session ready (2 windows: claude + codex)."
-
-elif [[ "$MODE" == "single" ]]; then
-    WORK_DIR=$(create_worktree "$AGENT")
-    echo "      Worktree: $WORK_DIR"
-
-    tmux new-session -d -s "$TMUX_SESSION" -c "$WORK_DIR"
-    tmux rename-window -t "${TMUX_SESSION}:0" "$AGENT"
-    echo "      tmux session ready (1 window: $AGENT)."
-fi
-
-# --- Route based on mode ---
-if [[ "$MODE" == "single" ]]; then
-    # ==================== SINGLE AGENT MODE ====================
-    echo ""
-    echo "[2/6] Sending task to $AGENT..."
-
-    RESULT_FILE="$OUTPUT_DIR/result_${AGENT}_${TIMESTAMP}.txt"
-
-    case "$AGENT" in
+    case "$agent" in
         claude)
-            CMD="claude -p --dangerously-skip-permissions '$(echo "$TASK" | sed "s/'/'\\\\''/g")' 2>&1 | tee /dev/stderr"
+            (cd "$work_dir" && claude -p --dangerously-skip-permissions "$prompt") \
+                > "$output_file" 2>&1 || true
             ;;
         codex)
-            CMD="codex --approval-mode full-auto --quiet '$(echo "$TASK" | sed "s/'/'\\\\''/g")' 2>&1 | tee /dev/stderr"
+            (cd "$work_dir" && codex exec "$prompt") \
+                > "$output_file" 2>&1 || true
+            ;;
+        *)
+            echo "ERROR: Unknown agent '$agent'" >&2
+            return 1
             ;;
     esac
 
-    send_and_wait "0" "$CMD" "$RESULT_FILE"
+    local lines
+    lines=$(wc -l < "$output_file")
+    echo "      Done. Output: $lines lines -> $(basename "$output_file")"
+}
+
+# ==================== SINGLE AGENT MODE ====================
+if [[ "$MODE" == "single" ]]; then
 
     echo ""
-    echo "[3/6] Task complete."
+    echo "[1/4] Creating worktree..."
+    WORK_DIR=$(create_worktree "$AGENT")
+    echo "      $WORK_DIR"
 
+    echo ""
+    echo "[2/4] Running $AGENT..."
+    RESULT_FILE="$OUTPUT_DIR/result_${AGENT}_${TIMESTAMP}.txt"
+    run_agent "$AGENT" "$TASK" "$WORK_DIR" "$RESULT_FILE"
+
+    echo ""
+    echo "[3/4] Extracting changes..."
+    cd "$WORK_DIR"
+    git diff HEAD > "$OUTPUT_DIR/changes_${TIMESTAMP}.diff" 2>/dev/null || true
+    cd "$PROJECT_ROOT"
+
+    echo ""
+    echo "[4/4] Cleanup (amnesia)..."
+    cleanup_worktrees
+
+    echo ""
+    echo "============================================"
+    echo " Done."
+    echo " Result: output/result_${AGENT}_${TIMESTAMP}.txt"
+    echo " Diff:   output/changes_${TIMESTAMP}.diff"
+    echo "============================================"
+    echo ""
+    echo "--- Output (last 30 lines) ---"
+    tail -30 "$RESULT_FILE" 2>/dev/null || echo "(empty)"
+
+# ==================== DUAL MODE ====================
 elif [[ "$MODE" == "dual" ]]; then
-    # ==================== DUAL MODE ====================
+
+    echo ""
+    echo "[1/7] Creating worktrees..."
+    CLAUDE_DIR=$(create_worktree "claude")
+    CODEX_DIR=$(create_worktree "codex")
+    echo "      Claude: $CLAUDE_DIR"
+    echo "      Codex:  $CODEX_DIR"
 
     # --- Phase 2: Claude plans ---
     echo ""
-    echo "[2/6] Claude: Planning..."
+    echo "[2/7] Claude: Planning..."
     PLAN_PROMPT="You are a senior architect. Analyze this task and create a detailed, step-by-step implementation plan. Output ONLY the plan as a numbered list, no code. Be specific about files, functions, and changes needed.
 
 TASK: $TASK"
 
     PLAN_FILE="$OUTPUT_DIR/plan_${TIMESTAMP}.txt"
-    PLAN_CMD="claude -p --dangerously-skip-permissions '$(echo "$PLAN_PROMPT" | sed "s/'/'\\\\''/g")' 2>&1 | tee /dev/stderr"
-    send_and_wait "claude" "$PLAN_CMD" "$PLAN_FILE"
-    echo "      Plan saved to: $PLAN_FILE"
+    run_agent "claude" "$PLAN_PROMPT" "$CLAUDE_DIR" "$PLAN_FILE"
 
     # Copy plan to codex worktree
     cp "$PLAN_FILE" "$CODEX_DIR/PLAN.md"
+    echo "      Plan copied to Codex worktree."
 
     # --- Phase 3: Codex implements ---
     echo ""
-    echo "[3/6] Codex: Implementing plan..."
+    echo "[3/7] Codex: Implementing plan..."
     IMPL_PROMPT="Read PLAN.md in the current directory and implement every step. Write code, create files, run tests if possible. Work until all steps are done."
 
     IMPL_FILE="$OUTPUT_DIR/implementation_${TIMESTAMP}.txt"
-    IMPL_CMD="codex --approval-mode full-auto --quiet '$(echo "$IMPL_PROMPT" | sed "s/'/'\\\\''/g")' 2>&1 | tee /dev/stderr"
-    send_and_wait "codex" "$IMPL_CMD" "$IMPL_FILE"
-    echo "      Implementation saved."
+    run_agent "codex" "$IMPL_PROMPT" "$CODEX_DIR" "$IMPL_FILE"
+
+    # --- Phase 4: Save Codex diff ---
+    echo ""
+    echo "[4/7] Saving Codex changes..."
+    cd "$CODEX_DIR"
+    git diff HEAD > "$OUTPUT_DIR/changes_codex_${TIMESTAMP}.diff" 2>/dev/null || true
+    git diff HEAD --stat > "$OUTPUT_DIR/changes_codex_${TIMESTAMP}.stat" 2>/dev/null || true
+    cd "$PROJECT_ROOT"
 
     # Copy codex changes to claude worktree for review
-    rsync -a --exclude='.git' "$CODEX_DIR/" "$CLAUDE_DIR/" 2>/dev/null || \
+    rsync -a --exclude='.git' "$CODEX_DIR/" "$CLAUDE_DIR/" 2>/dev/null || {
+        # rsync not available on Windows, fallback to cp
         cp -r "$CODEX_DIR"/* "$CLAUDE_DIR/" 2>/dev/null || true
+    }
 
-    # --- Phase 4: Claude reviews ---
+    # --- Phase 5: Claude reviews ---
     echo ""
-    echo "[4/6] Claude: Reviewing implementation..."
-    REVIEW_PROMPT="You are a senior code reviewer. Review the recent changes in this directory against PLAN.md. Check for: 1) Correctness 2) Security 3) Quality 4) Tests. Output a structured review with PASS/FAIL verdict."
+    echo "[5/7] Claude: Reviewing implementation..."
+    REVIEW_PROMPT="You are a senior code reviewer. Review the recent changes in this directory against PLAN.md. Check for: 1) Correctness — does the code match the plan? 2) Security — any vulnerabilities? 3) Quality — clean code, proper error handling? 4) Tests — are there tests? Output a structured review with PASS/FAIL verdict and list specific issues."
 
     REVIEW_FILE="$OUTPUT_DIR/review_${TIMESTAMP}.txt"
-    REVIEW_CMD="claude -p --dangerously-skip-permissions '$(echo "$REVIEW_PROMPT" | sed "s/'/'\\\\''/g")' 2>&1 | tee /dev/stderr"
-    send_and_wait "claude" "$REVIEW_CMD" "$REVIEW_FILE"
-    echo "      Review saved."
-fi
+    run_agent "claude" "$REVIEW_PROMPT" "$CLAUDE_DIR" "$REVIEW_FILE"
 
-# --- Phase 5: Extract results ---
-echo ""
-echo "[5/6] Collecting results..."
-if [[ "$MODE" == "dual" ]]; then
-    # Save codex's actual code changes as a diff
-    cd "$CODEX_DIR"
-    git diff HEAD > "$OUTPUT_DIR/changes_${TIMESTAMP}.diff" 2>/dev/null || true
-    git diff HEAD --stat > "$OUTPUT_DIR/changes_${TIMESTAMP}.stat" 2>/dev/null || true
-    cd "$PROJECT_ROOT"
-fi
+    # --- Phase 6: Collect all results ---
+    echo ""
+    echo "[6/7] Collecting results..."
+    echo "      All files in: $OUTPUT_DIR/"
 
-# --- Phase 6: Cleanup (Amnesia) ---
-echo ""
-echo "[6/6] Cleanup (amnesia)..."
-tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
-cleanup_worktrees
+    # --- Phase 7: Cleanup ---
+    echo ""
+    echo "[7/7] Cleanup (amnesia)..."
+    cleanup_worktrees
 
-echo ""
-echo "============================================"
-echo " Done. Results in: $OUTPUT_DIR/"
-echo "============================================"
-
-if [[ "$MODE" == "dual" ]]; then
+    echo ""
+    echo "============================================"
+    echo " Done. Dual-mode complete."
+    echo "============================================"
     echo ""
     echo "--- Files generated ---"
-    echo "  Plan:           plan_${TIMESTAMP}.txt"
-    echo "  Implementation: implementation_${TIMESTAMP}.txt"
-    echo "  Review:         review_${TIMESTAMP}.txt"
-    echo "  Code diff:      changes_${TIMESTAMP}.diff"
+    echo "  Plan:           output/plan_${TIMESTAMP}.txt"
+    echo "  Implementation: output/implementation_${TIMESTAMP}.txt"
+    echo "  Review:         output/review_${TIMESTAMP}.txt"
+    echo "  Code diff:      output/changes_codex_${TIMESTAMP}.diff"
+    echo "  Diff stats:     output/changes_codex_${TIMESTAMP}.stat"
     echo ""
-    echo "--- Review verdict (last 20 lines) ---"
-    tail -20 "$OUTPUT_DIR/review_${TIMESTAMP}.txt" 2>/dev/null || echo "(empty)"
+    echo "--- Review (last 20 lines) ---"
+    tail -20 "$REVIEW_FILE" 2>/dev/null || echo "(empty)"
+
 else
-    echo ""
-    echo "--- Output (last 30 lines) ---"
-    tail -30 "$OUTPUT_DIR/result_${AGENT}_${TIMESTAMP}.txt" 2>/dev/null || echo "(empty)"
+    echo "ERROR: Unknown mode '$MODE'. Use 'single' or 'dual'."
+    exit 1
 fi
