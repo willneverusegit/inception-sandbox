@@ -92,6 +92,14 @@ cleanup_worktrees() {
     rm -rf "$REPO_DIR/.worktrees/inception-"* 2>/dev/null || true
 }
 
+# --- Helper: strip plugin hook noise from claude output ---
+clean_claude_output() {
+    # Remove SessionEnd/Stop hook errors that appear in -p mode
+    sed '/^SessionEnd hook \[/,/\] failed:/d' | \
+    sed '/^Stop hook \[/,/\] failed:/d' | \
+    sed '/Prompt stop hooks are not yet supported/d'
+}
+
 # --- Helper: run agent CLI and capture output ---
 run_agent() {
     local agent="$1"
@@ -103,8 +111,8 @@ run_agent() {
 
     case "$agent" in
         claude)
-            (cd "$work_dir" && claude -p --dangerously-skip-permissions "$prompt") \
-                > "$output_file" 2>&1 || true
+            (cd "$work_dir" && claude -p --dangerously-skip-permissions "$prompt") 2>&1 \
+                | clean_claude_output > "$output_file" || true
             ;;
         codex)
             (cd "$work_dir" && codex exec --sandbox workspace-write "$prompt") \
