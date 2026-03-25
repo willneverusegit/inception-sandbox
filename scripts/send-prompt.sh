@@ -35,7 +35,7 @@ case "$AGENT" in
         (cd "$WORK_DIR" && claude -p --dangerously-skip-permissions "$PROMPT")
         ;;
     codex)
-        (cd "$WORK_DIR" && codex exec "$PROMPT")
+        (cd "$WORK_DIR" && codex exec --sandbox workspace-write "$PROMPT")
         ;;
     *)
         echo "ERROR: Unknown agent '$AGENT'. Use 'claude' or 'codex'."

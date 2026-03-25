@@ -107,7 +107,7 @@ run_agent() {
                 > "$output_file" 2>&1 || true
             ;;
         codex)
-            (cd "$work_dir" && codex exec "$prompt") \
+            (cd "$work_dir" && codex exec --sandbox workspace-write "$prompt") \
                 > "$output_file" 2>&1 || true
             ;;
         *)
