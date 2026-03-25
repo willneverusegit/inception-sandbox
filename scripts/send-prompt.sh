@@ -1,24 +1,51 @@
 #!/usr/bin/env bash
-# Send a prompt to the Claude agent running inside the Docker container.
-# Usage: ./send-prompt.sh "Your prompt here"
-# Usage: ./send-prompt.sh --file prompt.txt
+# Send a prompt to an agent running inside a Docker container.
+# Usage: ./send-prompt.sh [--agent claude|codex] "Your prompt here"
+# Usage: ./send-prompt.sh --agent codex --file prompt.txt
 
 set -euo pipefail
 
-CONTAINER="inception-sandbox"
-SESSION="agent"
+AGENT="claude"
+PROMPT=""
+FILE=""
 
-if [[ "${1:-}" == "--file" ]]; then
-    PROMPT=$(cat "${2:?Usage: --file <path>}")
-else
-    PROMPT="${1:?Usage: send-prompt.sh <prompt> | --file <path>}"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --agent) AGENT="$2"; shift 2 ;;
+        --file)  FILE="$2"; shift 2 ;;
+        *)       PROMPT="$1"; shift ;;
+    esac
+done
+
+if [[ -n "$FILE" ]]; then
+    PROMPT=$(cat "$FILE")
 fi
 
-# Escape special characters for tmux
-ESCAPED=$(printf '%s' "$PROMPT" | sed "s/'/'\\\\''/g")
+if [[ -z "$PROMPT" ]]; then
+    echo "Usage: send-prompt.sh [--agent claude|codex] <prompt> | --file <path>"
+    exit 1
+fi
 
-# Send the claude command with the prompt
-docker exec "$CONTAINER" tmux send-keys -t "$SESSION" \
-    "claude -p --dangerously-skip-permissions '$ESCAPED' 2>&1 | tee /output/last-response.txt" Enter
+# Route to correct container and CLI
+case "$AGENT" in
+    claude)
+        CONTAINER="inception-claude"
+        SESSION="agent"
+        ESCAPED=$(printf '%s' "$PROMPT" | sed "s/'/'\\\\''/g")
+        CMD="claude -p --dangerously-skip-permissions '$ESCAPED' 2>&1 | tee /output/last-response-claude.txt"
+        ;;
+    codex)
+        CONTAINER="inception-codex"
+        SESSION="agent"
+        ESCAPED=$(printf '%s' "$PROMPT" | sed "s/'/'\\\\''/g")
+        CMD="codex --approval-mode full-auto --quiet '$ESCAPED' 2>&1 | tee /output/last-response-codex.txt"
+        ;;
+    *)
+        echo "ERROR: Unknown agent '$AGENT'. Use 'claude' or 'codex'."
+        exit 1
+        ;;
+esac
 
-echo "[send-prompt] Prompt sent to container. Use read-output.sh to poll for results."
+docker exec "$CONTAINER" tmux send-keys -t "$SESSION" "$CMD" Enter
+
+echo "[send-prompt] Prompt sent to $AGENT ($CONTAINER). Use read-output.sh --agent $AGENT to poll."

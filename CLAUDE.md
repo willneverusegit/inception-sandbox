@@ -1,40 +1,50 @@
 # Inception-Sandbox
 
 ## Was ist das
-Multi-Model-Orchestrierung via tmux & Docker. Ein lokaler Claude-Code-Agent (Host) steuert einen oder mehrere KI-Agenten in isolierten Docker-Containern fern. Kommunikation laeuft ueber tmux send-keys / capture-pane.
+Multi-Model-Orchestrierung via tmux & Docker. Ein lokaler Claude-Code-Agent (Host) steuert Claude und Codex Agenten in isolierten Docker-Containern fern. Kommunikation laeuft ueber tmux send-keys / capture-pane.
 
 ## Architektur
 - **Host-Agent:** Lokaler Claude Code als Orchestrator (liest/schreibt nur via tmux)
-- **Container-Agent:** Claude Code mit `--dangerously-skip-permissions` in Docker
+- **Claude Container** (`inception-claude`): Claude Code mit `--dangerously-skip-permissions`
+- **Codex Container** (`inception-codex`): OpenAI Codex mit `--approval-mode full-auto`
+- **Shared Workspace:** Docker Volume das beide Container sehen
 - **Kommunikation:** `tmux send-keys` (Prompt senden) / `tmux capture-pane` (Output lesen)
-- **Isolation:** Jeder Container ist wegwerfbar — bei Fehler destroy + rebuild aus Basis-Image
+- **Isolation:** Beide Container sind wegwerfbar — bei Fehler destroy + rebuild
 
-## Use Cases
-1. **Riskante Code-Experimente** — Refactoring, Migrationen, Bash-Skripte ohne Host-Risiko
-2. **Multi-Modell-Zusammenarbeit** — Claude + Gemini CLI + OpenAI Codex parallel orchestrieren
-3. **Selbst-Patching** — Agent patcht eigene CLI-Dateien im Container
-4. **Integration mit Ralph-Wiggum-Loop** — Container als "Fabrik" fuer Phase 2 (Ausfuehrung)
+## Multi-Model Routing
+
+| Task-Typ | Agent | Warum |
+|----------|-------|-------|
+| Planung, Architektur | Claude | Besseres Reasoning |
+| Code-Review, Security | Claude | Konservativer, gruendlicher |
+| Implementierung, Refactoring | Codex | 2-3x token-effizienter |
+| Test-Fix Loops, Linting | Codex | Full-auto, keine Rueckfragen |
+| Feature (komplex) | Dual | Claude plant → Codex baut → Claude reviewed |
+
+## Orchestrator-Modi
+- `--mode single --agent claude` — Nur Claude (Default)
+- `--mode single --agent codex` — Nur Codex
+- `--mode dual` — Claude plant → Codex implementiert → Claude reviewed
 
 ## Tech Stack
-- **Docker** (Container-Runtime)
+- **Docker** (Container-Runtime, 2 Container: Claude + Codex)
 - **tmux** (Terminal-Multiplexer fuer async Kommunikation)
-- **Claude Code CLI** (`claude -p` auf Host, `claude --dangerously-skip-permissions` im Container)
-- **Optional:** Gemini CLI, OpenAI Codex CLI
+- **Claude Code CLI** (`claude --dangerously-skip-permissions` im Container)
+- **OpenAI Codex CLI** (`codex --approval-mode full-auto` im Container)
 - **Plattform:** Windows + WSL2 / Git Bash
 
 ## Voraussetzungen
 - Docker Desktop installiert und lauffaehig
-- tmux im Container-Image installiert
-- API-Keys fuer Claude (und optional Gemini/Codex) im Container verfuegbar
+- ANTHROPIC_API_KEY in `docker/.env`
+- OPENAI_API_KEY in `docker/.env`
 - WSL2 empfohlen fuer tmux auf Windows
 
 ## Konventionen
-- Docker-Images leben in `docker/`
+- Docker-Images in `docker/` (Dockerfile = Claude, Dockerfile.codex = Codex)
 - Orchestrator-Skripte in `scripts/`
 - Skills in `skills/{name}/SKILL.md`
 - Container werden nach jedem Task-Zyklus zerstoert (Amnesie-Prinzip)
-- Host-Agent schreibt Ergebnisse in `.agent-memory/` bevor Container stirbt
-- Keine persistenten Volumes fuer Code — nur fuer Ergebnisse/Logs
+- Ergebnisse in `output/` (plan, implementation, review, workspace_snapshot)
 
 ## Research-Workflow (Standard)
 Web-Recherche IMMER ueber die Research-Pipeline ausfuehren:
@@ -43,5 +53,6 @@ Ergebnisse in `research/<topic>-<date>.md` speichern. Siehe `skills/research-pip
 
 ## Sicherheit
 - Host fuehrt NIEMALS Code aus, der aus dem Container kommt, ohne Review
-- Container hat keinen Zugriff auf Host-Dateisystem (ausser explizite Mounts)
-- API-Keys werden via Docker Secrets oder Env-Vars injiziert, nie im Image
+- Container teilen nur /workspace Volume — kein Host-Dateisystem
+- API-Keys via .env Datei, nie im Image
+- Codex Container hat kein ANTHROPIC_API_KEY, Claude Container hat kein OPENAI_API_KEY
