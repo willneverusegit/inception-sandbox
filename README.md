@@ -1,27 +1,28 @@
 # Inception-Sandbox
 
-Multi-Model-Orchestrierung via tmux & Docker fuer Claude Code.
+Multi-Model-Orchestrierung: Claude Code + OpenAI Codex via tmux.
 
 ## Idee
 
-Ein lokaler Claude-Code-Agent ("Host") steuert KI-Agenten in isolierten Docker-Containern fern.
-Der Host sendet Prompts via `tmux send-keys` und liest Ergebnisse via `tmux capture-pane`.
-Im Container laeuft Claude Code mit `--dangerously-skip-permissions` — voellig autonom, aber sicher isoliert.
+Claude und Codex laufen lokal in separaten tmux-Sessions. Jeder Agent arbeitet
+in einer eigenen Git Worktree fuer Isolation. Keine API-Keys noetig — OAuth reicht.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  HOST (lokales System)                          │
+│  tmux session "inception"                       │
 │                                                 │
-│  Claude Code (Orchestrator)                     │
-│    │                                            │
-│    ├── tmux send-keys ──► Docker Container A    │
-│    │                       └─ Claude Code       │
-│    │                          (autonomous)      │
-│    │                                            │
-│    ├── tmux send-keys ──► Docker Container B    │
-│    │                       └─ Gemini CLI        │
-│    │                                            │
-│    └── tmux capture-pane ◄── Output lesen       │
+│  Window "claude"          Window "codex"        │
+│  ┌──────────────┐        ┌──────────────┐       │
+│  │ claude -p     │        │ codex         │       │
+│  │ --dangerously │        │ --full-auto   │       │
+│  │ -skip-perms   │        │ --quiet       │       │
+│  │              │        │              │       │
+│  │ Worktree A   │        │ Worktree B   │       │
+│  └──────────────┘        └──────────────┘       │
+│         │                       │               │
+│         └───── shared via ──────┘               │
+│                file copy                        │
+│                (PLAN.md, diffs)                  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -29,43 +30,68 @@ Im Container laeuft Claude Code mit `--dangerously-skip-permissions` — voellig
 
 ```
 inception-sandbox/
-├── CLAUDE.md              # Projekt-Instruktionen fuer Claude Code
+├── CLAUDE.md              # Projekt-Instruktionen
 ├── README.md              # Diese Datei
-├── docker/
-│   ├── Dockerfile         # Basis-Image mit Claude CLI + tmux
-│   └── docker-compose.yml # Container-Definitionen
 ├── scripts/
-│   ├── orchestrator.sh    # Host-seitiger Orchestrator
-│   ├── send-prompt.sh     # Prompt an Container senden
-│   └── read-output.sh     # Output aus Container lesen
-├── skills/                # Claude Code Skills
-│   └── inception/
-│       └── SKILL.md
-└── .agent-memory/         # Persistente Ergebnisse/Logs
+│   ├── orchestrator.sh    # Multi-Model Orchestrator (single/dual mode)
+│   ├── send-prompt.sh     # Prompt an Agent senden via tmux
+│   └── read-output.sh     # Output aus Agent lesen via tmux
+├── skills/
+│   ├── inception/SKILL.md
+│   ├── codex-worker/SKILL.md
+│   └── research-pipeline/SKILL.md
+├── research/              # Perplexity/NotebookLM Recherche-Ergebnisse
+└── output/                # Ergebnisse der Orchestrator-Laeufe
 ```
 
-## Use Cases
+## Schnellstart
 
-| Use Case | Beschreibung |
-|----------|-------------|
-| Riskante Experimente | Refactoring, Migrationen — Fehler bleiben im Container |
-| Multi-Modell | Claude + Gemini + Codex parallel orchestrieren |
-| Selbst-Patching | Agent patcht eigene CLI-Dateien sicher |
-| Ralph-Wiggum Phase 2 | Worker-Phase des Self-Improving-Loops |
+```bash
+# Voraussetzungen: tmux, claude CLI (Max Plan), codex CLI (Desktop App)
+
+# Einfach: Claude loest Task alleine
+./scripts/orchestrator.sh --prompt "Fix the login bug"
+
+# Codex fuer Bulk-Arbeit
+./scripts/orchestrator.sh --agent codex --prompt "Refactore alle Tests zu pytest"
+
+# Dual-Mode: Claude plant → Codex baut → Claude reviewed
+./scripts/orchestrator.sh --mode dual --prompt "Add pagination to the API"
+
+# Auf beliebigem Repo arbeiten
+./scripts/orchestrator.sh --mode dual --repo ~/projects/myapp --prompt "Add auth"
+```
+
+## Modi
+
+| Modus | Ablauf | Wann nutzen |
+|-------|--------|-------------|
+| `single --agent claude` | Claude alleine | Review, Planung, Security |
+| `single --agent codex` | Codex alleine | Refactoring, Linting, Bulk |
+| `dual` | Claude → Codex → Claude | Komplexe Features |
+
+### Dual-Mode Ablauf
+
+1. **Claude plant** → Erstellt `PLAN.md` mit Architektur + Schritten
+2. **Codex implementiert** → Liest Plan, schreibt Code autonom
+3. **Claude reviewed** → Prueft Code gegen Plan, gibt PASS/FAIL
+4. **Amnesia** → Worktrees geloescht, Ergebnisse in `output/`
 
 ## Voraussetzungen
 
-- Docker Desktop (oder WSL2 + Docker Engine)
-- tmux (im Container-Image)
-- Claude Code API Key
-- Optional: Gemini API Key, OpenAI API Key
+- **tmux** — `sudo apt install tmux` (WSL2) oder via Git Bash
+- **Claude CLI** — authentifiziert ueber Max Plan (OAuth, kein API Key)
+- **Codex CLI** — authentifiziert ueber Desktop App (OAuth, kein API Key)
+- **Git** — fuer Worktree-Isolation
 
-## Status
+## Warum kein Docker?
 
-**Phase: Planung** — Projektstruktur angelegt, Use Cases definiert. Naechster Schritt: Dockerfile + Orchestrator-Skript.
+Claude Max Plan und Codex Desktop App authentifizieren via OAuth/Browser,
+nicht via API-Key. Docker-Container koennten sich nicht einloggen.
+tmux + Git Worktrees bieten ausreichende Isolation fuer lokale Entwicklung.
 
 ## Quellen
 
-- YK: "32 Claude Code Tips" (Tipps 8, 10, 20)
-- YK: "45 Claude Code Tips" (Tipps 9, 11, 21)
-- NotebookLM Research: "Agentic AI & Self-Improving Workflows"
+- NotebookLM: "Multi-Model Orchestration & Sandboxed Agents"
+- Perplexity Research: Codex CLI + Claude Code Integration
+- Agent-of-Empires (aoe): tmux-basierter Session Manager

@@ -1,15 +1,14 @@
 # Inception-Sandbox
 
 ## Was ist das
-Multi-Model-Orchestrierung via tmux & Docker. Ein lokaler Claude-Code-Agent (Host) steuert Claude und Codex Agenten in isolierten Docker-Containern fern. Kommunikation laeuft ueber tmux send-keys / capture-pane.
+Multi-Model-Orchestrierung via tmux + Git Worktrees. Claude Code und OpenAI Codex laufen lokal in separaten tmux-Sessions, isoliert durch Git Worktrees. Keine API-Keys noetig — nutzt OAuth (Claude Max Plan + Codex Desktop App).
 
 ## Architektur
-- **Host-Agent:** Lokaler Claude Code als Orchestrator (liest/schreibt nur via tmux)
-- **Claude Container** (`inception-claude`): Claude Code mit `--dangerously-skip-permissions`
-- **Codex Container** (`inception-codex`): OpenAI Codex mit `--approval-mode full-auto`
-- **Shared Workspace:** Docker Volume das beide Container sehen
-- **Kommunikation:** `tmux send-keys` (Prompt senden) / `tmux capture-pane` (Output lesen)
-- **Isolation:** Beide Container sind wegwerfbar — bei Fehler destroy + rebuild
+- **Host:** Lokaler Rechner mit tmux
+- **Claude Session** (tmux window "claude"): `claude -p --dangerously-skip-permissions`
+- **Codex Session** (tmux window "codex"): `codex --approval-mode full-auto`
+- **Isolation:** Git Worktrees — jeder Agent arbeitet in eigener Kopie des Repos
+- **Kommunikation:** Dateisystem (PLAN.md, Ergebnisse) + tmux send-keys/capture-pane
 
 ## Multi-Model Routing
 
@@ -26,25 +25,17 @@ Multi-Model-Orchestrierung via tmux & Docker. Ein lokaler Claude-Code-Agent (Hos
 - `--mode single --agent codex` — Nur Codex
 - `--mode dual` — Claude plant → Codex implementiert → Claude reviewed
 
-## Tech Stack
-- **Docker** (Container-Runtime, 2 Container: Claude + Codex)
-- **tmux** (Terminal-Multiplexer fuer async Kommunikation)
-- **Claude Code CLI** (`claude --dangerously-skip-permissions` im Container)
-- **OpenAI Codex CLI** (`codex --approval-mode full-auto` im Container)
-- **Plattform:** Windows + WSL2 / Git Bash
-
 ## Voraussetzungen
-- Docker Desktop installiert und lauffaehig
-- ANTHROPIC_API_KEY in `docker/.env`
-- OPENAI_API_KEY in `docker/.env`
-- WSL2 empfohlen fuer tmux auf Windows
+- tmux installiert (WSL2 empfohlen auf Windows)
+- `claude` CLI authentifiziert (Max Plan, OAuth)
+- `codex` CLI authentifiziert (Desktop App, OAuth)
+- Git Repo als Arbeitsverzeichnis
 
 ## Konventionen
-- Docker-Images in `docker/` (Dockerfile = Claude, Dockerfile.codex = Codex)
 - Orchestrator-Skripte in `scripts/`
 - Skills in `skills/{name}/SKILL.md`
-- Container werden nach jedem Task-Zyklus zerstoert (Amnesie-Prinzip)
-- Ergebnisse in `output/` (plan, implementation, review, workspace_snapshot)
+- Worktrees werden nach jedem Task-Zyklus geloescht (Amnesie-Prinzip)
+- Ergebnisse in `output/` (plan, implementation, review, diff)
 
 ## Research-Workflow (Standard)
 Web-Recherche IMMER ueber die Research-Pipeline ausfuehren:
@@ -52,7 +43,7 @@ Web-Recherche IMMER ueber die Research-Pipeline ausfuehren:
 Ergebnisse in `research/<topic>-<date>.md` speichern. Siehe `skills/research-pipeline/SKILL.md`.
 
 ## Sicherheit
-- Host fuehrt NIEMALS Code aus, der aus dem Container kommt, ohne Review
-- Container teilen nur /workspace Volume — kein Host-Dateisystem
-- API-Keys via .env Datei, nie im Image
-- Codex Container hat kein ANTHROPIC_API_KEY, Claude Container hat kein OPENAI_API_KEY
+- Jeder Agent arbeitet in eigener Git Worktree — keine Cross-Pollution
+- Worktrees sind detached HEAD — koennen den Main Branch nicht beschaedigen
+- Ergebnisse muessen vom User reviewed werden bevor sie gemerged werden
+- Kein Docker noetig — Isolation ueber Git, nicht Container
