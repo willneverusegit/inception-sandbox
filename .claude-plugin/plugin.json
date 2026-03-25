@@ -1,0 +1,5 @@
+{
+  "name": "multi-model-orchestrator",
+  "version": "0.1.0",
+  "description": "Multi-model agent team orchestration. Routes tasks to the best model (Claude, Codex, etc.) with isolated git worktrees. Supports single-agent, dual-mode (plan-implement-review), and custom pipelines."
+}

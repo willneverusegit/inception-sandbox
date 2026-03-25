@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "multi-model-orchestrator-marketplace",
+  "description": "Multi-model agent team orchestration for Claude Code. Route tasks to Claude, Codex, or custom model teams.",
+  "owner": {
+    "name": "willneverusegit",
+    "email": "noreply@local"
+  },
+  "plugins": [
+    {
+      "name": "multi-model-orchestrator",
+      "description": "Multi-model orchestration: single-agent routing, dual-mode (Claude plans, Codex implements, Claude reviews), git worktree isolation.",
+      "category": "development",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/willneverusegit/inception-sandbox.git"
+      }
+    }
+  ]
+}
