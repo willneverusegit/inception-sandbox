@@ -1,4 +1,9 @@
-# Inception-Sandbox
+# Multi-Model Orchestrator (Inception-Sandbox)
+
+## Plugin-Info
+Dieses Projekt ist ein eigenstaendiges Claude Code Plugin. Es kann in jedem Projekt
+via `claude plugin install <pfad>` installiert und ueber `/orchestrate` aufgerufen werden.
+Bestehende direkte Zugriffe (z.B. ueber `scripts/`, `skills/`) funktionieren weiterhin.
 
 ## Was ist das
 Multi-Model-Orchestrierung via tmux + Git Worktrees. Claude Code und OpenAI Codex laufen lokal in separaten tmux-Sessions, isoliert durch Git Worktrees. Keine API-Keys noetig — nutzt OAuth (Claude Max Plan + Codex Desktop App).
@@ -32,7 +37,10 @@ Multi-Model-Orchestrierung via tmux + Git Worktrees. Claude Code und OpenAI Code
 - Git Repo als Arbeitsverzeichnis
 
 ## Konventionen
-- Orchestrator-Skripte in `scripts/`
+- **Plugin-Manifest:** `plugin.json`
+- **Plugin-Agents:** `agents/` (planner, implementer, reviewer, router)
+- **Slash-Command:** `commands/orchestrate.md` → `/orchestrate`
+- Orchestrator-Skripte in `scripts/` (weiterhin fuer Script-Modus)
 - Skills in `skills/{name}/SKILL.md`
 - Worktrees werden nach jedem Task-Zyklus geloescht (Amnesie-Prinzip)
 - Ergebnisse in `output/` (plan, implementation, review, diff)
