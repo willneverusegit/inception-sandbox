@@ -76,6 +76,8 @@ create_worktree() {
     mkdir -p "$(dirname "$wt_dir")"
 
     if git -C "$REPO_DIR" worktree add "$wt_dir" HEAD --detach >/dev/null 2>&1; then
+        # Allow Codex (runs as CodexSandboxOffline user) to access this worktree
+        git config --global --add safe.directory "$wt_dir" 2>/dev/null || true
         printf '%s' "$wt_dir"
     else
         echo "      WARN: git worktree failed, using directory copy" >&2
