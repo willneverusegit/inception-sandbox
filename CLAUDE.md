@@ -55,3 +55,14 @@ Ergebnisse in `research/<topic>-<date>.md` speichern. Siehe `skills/research-pip
 - Worktrees sind detached HEAD — koennen den Main Branch nicht beschaedigen
 - Ergebnisse muessen vom User reviewed werden bevor sie gemerged werden
 - Kein Docker noetig — Isolation ueber Git, nicht Container
+
+## Agent Learnings
+
+<!-- Auto-maintained by wrap-up skill. Last updated: 2026-03-26 -->
+- Codex in WSL braucht eigene Auth: `cp /mnt/c/Users/domes/.codex/{auth.json,config.toml} ~/.codex/`
+- ChatGPT-Abo: nur gpt-5.x Modelle (5.4, 5.3-codex, 5.2-codex, etc.) — o3/o4-mini brauchen API-Key
+- Codex MCP-Server in Swarm deaktivieren: `-c mcp_servers='{}'` vermeidet Auth-Noise
+- Reasoning-Level per Agent: `-c model_reasoning_effort=low|medium|high|xhigh`
+- Worktree Diff-Erfassung: erst `git add -A` dann `git diff --cached HEAD` fuer neue Files
+- Research-Pipeline nutzt jetzt notebooklm-py CLI statt MCP-Plugin (zuverlaessiger, parallel-faehig)
+- Codex Swarm Skill: `skills/codex-swarm/` + `scripts/codex-swarm.sh` (N parallele Agents via tmux/WSL2)

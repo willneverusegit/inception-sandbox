@@ -79,19 +79,21 @@ Token-optimierte Recherche durch Auslagerung an spezialisierte Tools.
 
 ### Phase 2: NotebookLM Ingest
 
-1. NotebookLM oeffnen (oder bestehendes Notebook navigieren)
-2. Neues Notebook erstellen falls noetig (`/notebooklm:create-notebook`)
-3. Links aus Phase 1 als Quellen hinzufuegen (`/notebooklm:add-source`)
-4. Warten bis Gemini alle Quellen indexiert hat
+1. Notebook erstellen: `notebooklm create "Research: <topic>"`
+2. Notebook-ID merken (aus JSON-Output)
+3. Links aus Phase 1 als Quellen hinzufuegen: `notebooklm source add "<url>" --json`
+4. Auf Indexierung warten: `notebooklm source wait <source_id> -n <notebook_id>`
 
 ### Phase 3: NotebookLM Analyse
 
-1. Gezielte Fragen stellen (`/notebooklm:chat`):
-   - "Was sind die konkreten Use Cases fuer X?"
-   - "Vergleiche Ansatz A vs B"
-   - "Welche Risiken und Einschraenkungen gibt es?"
-2. Antworten extrahieren und lokal speichern
-3. Optional: Studio-Outputs generieren (`/notebooklm:studio`)
+1. Gezielte Fragen stellen via CLI:
+   ```bash
+   notebooklm ask "Was sind die konkreten Use Cases fuer X?" --json
+   notebooklm ask "Vergleiche Ansatz A vs B" --json
+   notebooklm ask "Welche Risiken und Einschraenkungen gibt es?" --json
+   ```
+2. Antworten aus JSON-Output extrahieren und lokal speichern
+3. Optional: Studio-Outputs generieren (`notebooklm generate report --format briefing-doc`)
 
 ### Phase 4: Claude Integration
 
@@ -125,5 +127,5 @@ research/
 
 - Perplexity-Account (Free oder Pro)
 - Google-Account fuer NotebookLM
-- Playwright MCP (Browser-Steuerung)
-- NotebookLM Skills installiert (`/notebooklm:*`)
+- `notebooklm-py` CLI installiert (`pip install notebooklm-py`)
+- Authentifiziert via `notebooklm login`
