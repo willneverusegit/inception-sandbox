@@ -22,6 +22,7 @@ REASONING="medium"
 PROMPT=""
 CONFIG_FILE=""
 TIMEOUT=600
+DECOMPOSE=false
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SESSION_NAME="codex-swarm-${TIMESTAMP}"
 
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --reasoning) REASONING="$2"; shift 2 ;;
         --config)    CONFIG_FILE="$2"; shift 2 ;;
         --timeout)   TIMEOUT="$2"; shift 2 ;;
+        --decompose) DECOMPOSE=true; shift ;;
         *)         echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -75,6 +77,8 @@ Options:
   --prompt <text>       Prompt for all agents
   --config <file.json>  JSON config with per-agent settings
   --timeout <seconds>   Max wait time per agent (default: 600)
+  --decompose           Let Claude split the task into N sub-tasks
+  --reasoning <level>   Reasoning level: low|medium|high|xhigh (default: medium)
 
 Examples:
   ./codex-swarm.sh --repo ~/app --agents 5 --model o4-mini --prompt "Write tests"
@@ -114,6 +118,74 @@ get_agent_config() {
         jq -r ".agents[$idx].$field // empty" "$CONFIG_FILE"
     fi
 }
+
+# --- Task Decomposition (Claude as Oberagent) ---
+if [[ "$DECOMPOSE" == "true" && -z "$CONFIG_FILE" ]]; then
+    if ! command -v claude &>/dev/null; then
+        echo "ERROR: --decompose requires claude CLI"
+        exit 1
+    fi
+    if [[ -z "$PROMPT" ]]; then
+        echo "ERROR: --decompose requires --prompt"
+        exit 1
+    fi
+
+    echo "[0/6] Task decomposition: Claude splitting into $NUM_AGENTS sub-tasks..."
+
+    # Get repo context (file tree, limited depth)
+    REPO_TREE=""
+    if [[ -d "$REPO_DIR" ]]; then
+        REPO_TREE=$(find "$REPO_DIR" -maxdepth 3 -not -path '*/\.git/*' -not -path '*/node_modules/*' -not -path '*/__pycache__/*' | head -100 2>/dev/null || true)
+    fi
+
+    DECOMPOSE_PROMPT="Du bist ein Task-Decomposer fuer einen Codex Swarm.
+Zerlege den folgenden High-Level-Task in genau $NUM_AGENTS unabhaengige Sub-Tasks.
+Jeder Sub-Task wird von einem eigenen Codex-Agent in einer eigenen Worktree-Kopie bearbeitet.
+
+HIGH-LEVEL TASK: $PROMPT
+
+REPO FILES (Auszug):
+$REPO_TREE
+
+REGELN:
+- Sub-Tasks muessen UNABHAENGIG sein (keine Abhaengigkeiten untereinander)
+- Jeder Sub-Task soll eine klare, ausfuehrbare Anweisung sein
+- Vermeide Ueberlappung (verschiedene Dateien/Module pro Agent)
+- Gib fuer jeden Sub-Task das empfohlene Modell und Reasoning-Level an
+
+Antworte NUR mit einer JSON-Config (kein Markdown, keine Erklaerung):
+{
+  \"repo\": \"$REPO_DIR\",
+  \"timeout\": $TIMEOUT,
+  \"agents\": [
+    {\"name\": \"<kurzer-name>\", \"model\": \"gpt-5.4-mini\", \"reasoning\": \"medium\", \"prompt\": \"<ausfuehrliche Anweisung>\"},
+    ...
+  ]
+}"
+
+    GENERATED_CONFIG="$OUTPUT_DIR/generated-config.json"
+    echo "$DECOMPOSE_PROMPT" | claude -p --output-format text > "$GENERATED_CONFIG" 2>/dev/null
+
+    # Extract JSON (Claude might wrap in markdown code blocks)
+    if grep -q '```' "$GENERATED_CONFIG"; then
+        sed -n '/^```/,/^```/p' "$GENERATED_CONFIG" | grep -v '```' > "$GENERATED_CONFIG.tmp"
+        mv "$GENERATED_CONFIG.tmp" "$GENERATED_CONFIG"
+    fi
+
+    # Validate JSON
+    if ! jq empty "$GENERATED_CONFIG" 2>/dev/null; then
+        echo "ERROR: Claude generated invalid JSON. Check: $GENERATED_CONFIG"
+        exit 1
+    fi
+
+    # Use generated config
+    CONFIG_FILE="$GENERATED_CONFIG"
+    NUM_AGENTS=$(jq '.agents | length' "$CONFIG_FILE")
+    echo "  Generated $NUM_AGENTS sub-tasks. Config: $GENERATED_CONFIG"
+    echo ""
+    jq -r '.agents[] | "  - \(.name): \(.model) (\(.reasoning)) — \(.prompt[:60])..."' "$CONFIG_FILE" 2>/dev/null || true
+    echo ""
+fi
 
 echo "============================================"
 echo " Codex Swarm Orchestrator"
@@ -245,9 +317,123 @@ for i in $(seq 0 $((NUM_AGENTS - 1))); do
     fi
 done
 
-# --- Phase 5: Cleanup ---
+# --- Phase 5: Review (Claude Opus as Oberagent) ---
 echo ""
-echo "[5/5] Cleanup..."
+echo "[5/6] Reviewing results with Claude Opus..."
+
+# Build review prompt from all diffs and outputs
+REVIEW_INPUT=""
+for i in $(seq 0 $((NUM_AGENTS - 1))); do
+    agent_name="agent-$i"
+    if [[ -n "$CONFIG_FILE" ]]; then
+        cfg_name=$(get_agent_config "$i" "name")
+        [[ -n "$cfg_name" ]] && agent_name="$cfg_name"
+    fi
+
+    diff_file="$OUTPUT_DIR/${agent_name}.diff"
+    stat_file="$OUTPUT_DIR/${agent_name}.stat"
+    out_file="$OUTPUT_DIR/${agent_name}.txt"
+    done_file="$OUTPUT_DIR/${agent_name}.done"
+
+    REVIEW_INPUT+="
+=== AGENT: $agent_name ===
+"
+    if [[ -f "$done_file" ]]; then
+        REVIEW_INPUT+="Exit code: $(cat "$done_file")
+"
+    fi
+    if [[ -f "$stat_file" && -s "$stat_file" ]]; then
+        REVIEW_INPUT+="--- Diff stat ---
+$(cat "$stat_file")
+"
+    fi
+    if [[ -f "$diff_file" && -s "$diff_file" ]]; then
+        # Truncate very large diffs to avoid context overflow
+        diff_lines=$(wc -l < "$diff_file")
+        if [[ "$diff_lines" -gt 500 ]]; then
+            REVIEW_INPUT+="--- Diff (first 500 of $diff_lines lines) ---
+$(head -500 "$diff_file")
+... (truncated)
+"
+        else
+            REVIEW_INPUT+="--- Diff ---
+$(cat "$diff_file")
+"
+        fi
+    else
+        REVIEW_INPUT+="(no changes)
+"
+    fi
+done
+
+REVIEW_PROMPT="Du bist der Review-Agent fuer einen Codex Swarm Run.
+Analysiere die Ergebnisse aller $NUM_AGENTS Agents:
+
+$REVIEW_INPUT
+
+Erstelle einen strukturierten Review-Bericht:
+
+1. **Pro Agent:** Was wurde gemacht? Ist die Aenderung korrekt und vollstaendig?
+2. **Konflikte:** Gibt es Konflikte zwischen den Agents (gleiche Dateien geaendert)?
+3. **Qualitaet:** Offensichtliche Bugs, fehlende Error-Handling, Style-Issues?
+4. **Merge-Empfehlung:** Welche Diffs koennen sicher gemerged werden, welche brauchen manuelles Review?
+5. **Zusammenfassung:** 2-3 Saetze Gesamtbewertung.
+
+Antworte auf Deutsch. Sei konkret und referenziere Dateinamen."
+
+# Try claude CLI for review, fall back to summary without review
+REVIEW_FILE="$OUTPUT_DIR/review.md"
+if command -v claude &>/dev/null; then
+    echo "$REVIEW_PROMPT" | claude -p --output-format text > "$REVIEW_FILE" 2>/dev/null || {
+        echo "  WARN: Claude review failed, generating basic summary"
+        echo "# Swarm Review (auto-generated — Claude not available)" > "$REVIEW_FILE"
+        echo "" >> "$REVIEW_FILE"
+        echo "Review konnte nicht ausgefuehrt werden. Bitte Diffs manuell pruefen." >> "$REVIEW_FILE"
+    }
+    echo "  Review saved to: $OUTPUT_DIR/review.md"
+else
+    echo "  SKIP: claude CLI not found, no review generated"
+    echo "# Swarm Review (skipped — claude CLI not found)" > "$REVIEW_FILE"
+fi
+
+# --- Generate summary.md ---
+cat > "$OUTPUT_DIR/summary.md" <<SUMMARY_EOF
+# Codex Swarm Summary
+
+- **Date:** $(date '+%Y-%m-%d %H:%M')
+- **Agents:** $NUM_AGENTS
+- **Repo:** $REPO_DIR
+- **Timeout:** ${TIMEOUT}s
+- **Session:** $SESSION_NAME
+
+## Agent Results
+
+$(for i in $(seq 0 $((NUM_AGENTS - 1))); do
+    agent_name="agent-$i"
+    if [[ -n "$CONFIG_FILE" ]]; then
+        cfg_name=$(get_agent_config "$i" "name")
+        [[ -n "$cfg_name" ]] && agent_name="$cfg_name"
+    fi
+    done_file="$OUTPUT_DIR/${agent_name}.done"
+    diff_file="$OUTPUT_DIR/${agent_name}.diff"
+    meta_file="$OUTPUT_DIR/${agent_name}.meta.json"
+    exit_code="N/A"
+    diff_lines=0
+    [[ -f "$done_file" ]] && exit_code=$(cat "$done_file")
+    [[ -f "$diff_file" ]] && diff_lines=$(wc -l < "$diff_file" 2>/dev/null || echo 0)
+    model_info=""
+    [[ -f "$meta_file" ]] && model_info=$(jq -r '.model' "$meta_file" 2>/dev/null || true)
+    echo "- **$agent_name** (${model_info:-unknown}): exit=$exit_code, $diff_lines diff lines"
+done)
+
+## Review
+
+See [review.md](review.md) for detailed review.
+SUMMARY_EOF
+
+# --- Phase 6: Cleanup ---
+echo ""
+echo "[6/6] Cleanup..."
 tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 git -C "$REPO_DIR" worktree prune 2>/dev/null || true
 rm -rf "$REPO_DIR/.worktrees/swarm-${TIMESTAMP}-"* 2>/dev/null || true
@@ -256,6 +442,7 @@ echo ""
 echo "============================================"
 echo " Swarm complete."
 echo " Results: $OUTPUT_DIR/"
+echo " Review:  $OUTPUT_DIR/review.md"
 echo "============================================"
 echo ""
 ls -la "$OUTPUT_DIR/"

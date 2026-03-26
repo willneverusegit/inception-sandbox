@@ -39,7 +39,7 @@ Multi-Model-Orchestrierung via tmux + Git Worktrees. Claude Code und OpenAI Code
 ## Konventionen
 - **Plugin-Manifest:** `plugin.json`
 - **Plugin-Agents:** `agents/` (planner, implementer, reviewer, router)
-- **Slash-Command:** `commands/orchestrate.md` → `/orchestrate`
+- **Slash-Commands:** `commands/orchestrate.md` → `/orchestrate`, `commands/codex-swarm.md` → `/codex-swarm`
 - Orchestrator-Skripte in `scripts/` (weiterhin fuer Script-Modus)
 - Skills in `skills/{name}/SKILL.md`
 - Worktrees werden nach jedem Task-Zyklus geloescht (Amnesie-Prinzip)
@@ -66,3 +66,6 @@ Ergebnisse in `research/<topic>-<date>.md` speichern. Siehe `skills/research-pip
 - Worktree Diff-Erfassung: erst `git add -A` dann `git diff --cached HEAD` fuer neue Files
 - Research-Pipeline nutzt jetzt notebooklm-py CLI statt MCP-Plugin (zuverlaessiger, parallel-faehig)
 - Codex Swarm Skill: `skills/codex-swarm/` + `scripts/codex-swarm.sh` (N parallele Agents via tmux/WSL2)
+- Codex Swarm Slash-Command: `/codex-swarm` in `commands/codex-swarm.md`
+- Codex Swarm `--decompose`: Claude zerlegt High-Level-Task automatisch in N unabhaengige Sub-Tasks
+- Codex Swarm Review-Phase: Claude Opus reviewed alle Diffs automatisch nach Completion → `review.md`

@@ -73,6 +73,16 @@ Der Swarm wird ueber eine JSON-Konfiguration oder CLI-Flags gesteuert:
   --agents 3 \
   --models "gpt-5.4-mini,gpt-5.3-codex,gpt-5.4" \
   --prompt "Implementiere die TODO-Kommentare in diesem Repo"
+
+# Task-Zerlegung: Claude zerlegt automatisch in Sub-Tasks
+./scripts/codex-swarm.sh \
+  --repo ~/projects/myapp \
+  --agents 4 \
+  --decompose \
+  --prompt "Refactore das gesamte Projekt auf async/await und schreibe Tests"
+
+# Slash-Command (aus Claude Code heraus)
+# /codex-swarm --prompt "Write tests for all modules" --agents 5 --decompose yes
 ```
 
 ### JSON-Config (swarm-config.json)
@@ -112,9 +122,22 @@ Der Swarm wird ueber eine JSON-Konfiguration oder CLI-Flags gesteuert:
 
 ## Ablauf im Detail
 
-### Phase 1: Setup (Claude Opus 4.6)
+### Phase 0: Task-Zerlegung (optional, `--decompose`)
 
-1. Konfiguration parsen (CLI-Flags oder JSON)
+Claude Opus analysiert den High-Level-Task und das Repo, zerlegt ihn in N
+unabhaengige Sub-Tasks mit passendem Modell und Reasoning-Level pro Agent.
+Generiert automatisch eine `generated-config.json`.
+
+```bash
+# Claude zerlegt "Refactore das gesamte Projekt" in z.B.:
+#   Agent 0: "Refactore src/utils/ zu async/await" (gpt-5.4-mini, low)
+#   Agent 1: "Refactore src/api/ zu async/await" (gpt-5.3-codex, medium)
+#   Agent 2: "Update alle Tests" (gpt-5.4-mini, low)
+```
+
+### Phase 1: Setup
+
+1. Konfiguration parsen (CLI-Flags, JSON, oder generierte Config)
 2. Validierung: Repo existiert, tmux verfuegbar, codex CLI vorhanden
 3. tmux-Session erstellen: `codex-swarm-<timestamp>`
 4. N Git Worktrees erstellen (parallel)
@@ -132,37 +155,37 @@ tmux send-keys -t "codex-swarm-$TS:$i" \
 
 ### Phase 3: Wait (Polling)
 
-```bash
-# Warte bis alle .done Marker existieren
-while [[ $(ls $OUTPUT_DIR/*.done 2>/dev/null | wc -l) -lt $N ]]; do
-  sleep 10
-done
-```
-
 Timeout: Standardmaessig 600s (10 min), konfigurierbar via `--timeout`.
 
-### Phase 4: Collect (Claude Opus 4.6)
+### Phase 4: Collect
 
-1. Diffs aus allen Worktrees extrahieren
+1. Diffs aus allen Worktrees extrahieren (`git add -A && git diff --cached HEAD`)
 2. Agent-Outputs sammeln
-3. Ergebnisse in `output/swarm-<timestamp>/` ablegen:
-   ```
-   output/swarm-<timestamp>/
-   ├── config.json              # Verwendete Konfiguration
-   ├── agent-0.txt              # Stdout von Agent 0
-   ├── agent-0.diff             # Git diff von Agent 0
-   ├── agent-1.txt
-   ├── agent-1.diff
-   ├── ...
-   └── summary.md               # Oberagent-Zusammenfassung
-   ```
+3. Ergebnisse in `output/swarm-<timestamp>/` ablegen
 
-### Phase 5: Review + Merge (Claude Opus 4.6)
+### Phase 5: Review (Claude Opus 4.6)
 
-1. Alle Diffs reviewen auf Konflikte
-2. Nicht-konfliktierende Changes automatisch mergen
-3. Konflikte markieren fuer manuelles Review
-4. `summary.md` mit Ergebnissen pro Agent erstellen
+Claude Opus reviewed automatisch alle gesammelten Diffs:
+1. **Pro Agent:** Korrektheit und Vollstaendigkeit der Aenderungen
+2. **Konflikte:** Gleiche Dateien von mehreren Agents geaendert?
+3. **Qualitaet:** Bugs, fehlende Error-Handling, Style-Issues
+4. **Merge-Empfehlung:** Safe-to-merge vs. manuelles Review noetig
+5. Ergebnis in `review.md` gespeichert
+
+### Phase 6: Cleanup
+
+Worktrees loeschen, tmux-Session beenden.
+
+```
+output/swarm-<timestamp>/
+├── generated-config.json    # Task-Zerlegung (bei --decompose)
+├── agent-0.txt              # Stdout von Agent 0
+├── agent-0.diff             # Git diff von Agent 0
+├── agent-0.meta.json        # Modell, Reasoning, Worktree
+├── ...
+├── summary.md               # Oberagent-Zusammenfassung
+└── review.md                # Claude Opus Review
+```
 
 ## Modell-Optionen
 
