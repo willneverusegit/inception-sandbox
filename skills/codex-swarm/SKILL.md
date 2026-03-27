@@ -10,7 +10,7 @@ triggers:
   - "multi codex"
   - "codex schwarm"
   - "viele agents spawnen"
-  - "swarm orchestrate"
+  - "parallel agents"
 ---
 
 # Codex Swarm Skill
