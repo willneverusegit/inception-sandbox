@@ -123,6 +123,78 @@ research/
 └── <topic>-links.md                 # Extrahierte Links fuer NotebookLM
 ```
 
+## Fehlerbehandlung
+
+### Phase 1: Perplexity nicht erreichbar / Rate-Limit
+
+**Problem:** Perplexity gibt Fehler zurueck oder Rate-Limit (Free Tier: 5 Pro Searches/Tag) ist erschoepft.
+
+**Fallback:** WebSearch-Tool direkt nutzen:
+```
+→ WebSearch("<thema> best practices site:github.com OR site:stackoverflow.com")
+→ Ergebnisse manuell in research/<topic>-<YYYY-MM-DD>.md speichern
+→ Mit Phase 4 fortfahren (Phase 2-3 optional)
+```
+
+### Phase 2-3: NotebookLM CLI nicht installiert
+
+**Problem:** `notebooklm` Befehl nicht gefunden (`command not found` oder `ModuleNotFoundError`).
+
+**Fallback:** Phase 2 und 3 ueberspringen, Perplexity-Ergebnisse direkt in Phase 4 verwenden:
+```
+→ research/<topic>-<YYYY-MM-DD>.md mit Read-Tool laden
+→ Direkt mit Claude-Integration (Phase 4) fortfahren
+→ Token-Ersparnis reduziert sich, aber Pipeline bleibt funktional
+```
+
+### Phase 2: Notebook-Erstellung schlaegt fehl
+
+**Problem:** `notebooklm create` gibt Fehler zurueck (z.B. API-Fehler, Netzwerkproblem).
+
+**Vorgehen:**
+1. Einmal wiederholen (retry): `notebooklm create "Research: <topic>"` erneut ausfuehren
+2. Schlaegt der Retry ebenfalls fehl → Inline-Research als Fallback:
+   - Quellen direkt via WebSearch oder Read-Tool laden
+   - Zusammenfassung lokal als `research/<topic>-inline-<YYYY-MM-DD>.md` speichern
+   - Mit Phase 4 fortfahren
+
+### Phase 2: Source-Import Timeout
+
+**Problem:** `notebooklm source wait` haengt oder Quelle wird nicht innerhalb von 60s indexiert.
+
+**Vorgehen:**
+```
+→ Warning loggen: "⚠ Source <url> timeout — wird uebersprungen"
+→ Mit erfolgreich importierten Quellen fortfahren
+→ Mindestens 1 Quelle muss erfolgreich sein, sonst zu Phase-2-Fehler-Fallback wechseln
+```
+
+### Phase 3: RAG-Abfrage liefert leeres Ergebnis
+
+**Problem:** `notebooklm ask` gibt leere Antwort oder "No relevant content found" zurueck.
+
+**Vorgehen:**
+1. Query vereinfachen und wiederholen:
+   ```bash
+   # Original (zu spezifisch):
+   notebooklm ask "Was sind die konkreten Implementierungsdetails fuer X in Kontext Y?" --json
+   # Vereinfacht:
+   notebooklm ask "X erklaeren" --json
+   ```
+2. Alternative Fragestellung versuchen (Stichwoerter statt vollstaendige Frage)
+3. Bleibt Ergebnis leer → direkt auf Perplexity-Rohdata (Phase 1 Output) zurueckgreifen
+
+### Authentifizierung abgelaufen
+
+**Problem:** NotebookLM CLI gibt `AuthenticationError`, `401 Unauthorized` oder `Token expired` zurueck.
+
+**Vorgehen:**
+```
+→ Nutzer auffordern: `notebooklm login` ausfuehren
+→ Pipeline pausieren bis Bestaetigung erfolgt
+→ Ab Phase 2 neu starten (Phase 1 Ergebnis bleibt gueltig)
+```
+
 ## Voraussetzungen
 
 - Perplexity-Account (Free oder Pro)
