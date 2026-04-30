@@ -2,3 +2,6 @@ output/
 .env
 docker/.env
 .agent-memory/
+
+# Cygwin/MSYS bash stackdumps
+*.stackdump

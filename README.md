@@ -1,6 +1,14 @@
-# Inception-Sandbox
+# multi-model-orchestrator (Repo: `inception-sandbox/`)
 
-Multi-Model-Orchestrierung: Claude Code + OpenAI Codex via tmux.
+> **Identitaet (Stand 2026-04-30):** Plugin-Name ist `multi-model-orchestrator`.
+> Der Repo-Pfad heisst aus historischen Gruenden `inception-sandbox` — ein Rename
+> wuerde Cache, Marketplace-Eintrag, lokale Pfade und Submodule-Referenzen brechen
+> ohne Public-API-Mehrwert. Andere Plugins rufen diesen ueber `multi-model-orchestrator:codex-swarm`
+> u. a. auf, der Manifest-Name ist die einzige externe API.
+> Volle Erklaerung: `CLAUDE.md` Sektion "Identitaet".
+
+Multi-Model-Orchestrierung: Claude Code + OpenAI Codex via tmux + Git Worktrees.
+Optionaler Docker-Sandbox-Modus via `skills/inception/` fuer Faelle, in denen Worktree-Isolation nicht reicht.
 
 ## Idee
 

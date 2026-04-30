@@ -1,14 +1,23 @@
 ---
 name: inception
-description: Run a task in an isolated Docker sandbox via tmux orchestration
+description: "OPTIONAL Docker-Sandbox-Modus fuer multi-model-orchestrator. Standardmodus des Plugins ist tmux+Worktrees (siehe scripts/orchestrator.sh) — dieser Skill ist eine alternative Isolations-Schicht fuer destruktive oder besonders sensible Tasks. Triggert nur bei explizitem Wunsch nach Container-Isolation."
 triggers:
-  - "run in sandbox"
-  - "inception"
-  - "isoliert ausfuehren"
-  - "docker sandbox"
+  - "run in docker sandbox"
+  - "container sandbox for this"
+  - "use the inception docker mode"
+metadata:
+  status: optional-mode
+  identity-clarified: 2026-04-30
+  note: "Docker-Path is documented but not the plugin's default execution flow — main flow uses tmux + Git Worktrees. Use this skill only when the user explicitly asks for container-level isolation beyond what worktrees provide."
 ---
 
-# Inception Sandbox Skill
+# Inception Sandbox Skill (optionaler Docker-Modus)
+
+> **Hinweis 2026-04-30:** Dies ist der **optionale Docker-Sandbox-Modus** des
+> `multi-model-orchestrator`-Plugins. Der Hauptmodus des Plugins nutzt
+> tmux + Git Worktrees (siehe `scripts/orchestrator.sh` und `skills/codex-swarm/`).
+> Aktiviere diesen Skill nur, wenn der User explizit Container-Isolation
+> ausserhalb der Worktree-Schicht moechte (destruktive Tasks, sensible Daten).
 
 Fuehre eine Aufgabe in einem isolierten Docker-Container aus.
 
