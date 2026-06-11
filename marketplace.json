@@ -3,7 +3,7 @@
   "name": "multi-model-orchestrator-marketplace",
   "description": "Multi-model agent team orchestration for Claude Code. Route tasks to Claude, Codex, or custom model teams.",
   "owner": {
-    "name": "willneverusegit",
+    "name": "dynamic-dome",
     "email": "noreply@local"
   },
   "plugins": [
@@ -13,7 +13,7 @@
       "category": "development",
       "source": {
         "source": "url",
-        "url": "https://github.com/willneverusegit/inception-sandbox.git"
+        "url": "https://github.com/dynamic-dome/inception-sandbox.git"
       }
     }
   ]
